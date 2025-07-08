@@ -2,13 +2,21 @@
   "name": "agent-todo-mcp",
   "version": "1.0.0",
   "description": "MCP server for agent TODO management and task tracking",
-  "keywords": ["mcp", "todo", "task", "management", "agent", "ai", "model-context-protocol"],
+  "keywords": [
+    "mcp",
+    "todo",
+    "task",
+    "management",
+    "agent",
+    "ai",
+    "model-context-protocol"
+  ],
   "license": "MIT",
   "author": "w04m1",
   "homepage": "https://github.com/w04m1/agent-todo-mcp/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/w04m1/agent-todo-mcp.git"
+    "url": "git+https://github.com/w04m1/agent-todo-mcp.git"
   },
   "bugs": {
     "url": "https://github.com/w04m1/agent-todo-mcp/issues"
