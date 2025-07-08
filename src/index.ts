@@ -116,7 +116,23 @@ function formatTodoForDisplay(todo: Todo): string {
 // Initialize the FastMCP server
 const server = new FastMCP({
   name: "Agent TODO Manager",
-  version: "1.0.0",
+  version: "1.0.1",
+  // Configure ping behavior to improve connection stability
+  ping: {
+    enabled: true,
+    intervalMs: 10000, // Ping every 30 seconds instead of default 5 seconds
+    logLevel: "info", // Reduce ping noise in logs
+  },
+  // Configure roots support (helps with capability negotiation)
+  roots: {
+    enabled: true,
+  },
+  // Configure health check for better monitoring
+  health: {
+    enabled: true,
+    message: "Agent TODO MCP Server is healthy",
+    status: 200,
+  },
   instructions: `
 Agent TODO Management System for efficient task tracking and management.
 
@@ -852,7 +868,8 @@ server.addTool({
 // Tool: List available projects
 server.addTool({
   name: "list_projects",
-  description: "List all available project workspaces. RECOMMENDED: Call this first to see existing projects before creating new ones with switch_project.",
+  description:
+    "List all available project workspaces. RECOMMENDED: Call this first to see existing projects before creating new ones with switch_project.",
   execute: async () => {
     try {
       const baseDataDir = join(
@@ -909,9 +926,590 @@ server.addTool({
   },
 });
 
+// ====== RESOURCES SUPPORT ======
+// Expose TODO data and reports as readable resources
+
+server.addResource({
+  uri: "project://current/summary",
+  name: "Current project summary",
+  description: "Summary of the current project with stats and recent activity",
+  mimeType: "text/markdown",
+  async load() {
+    const projectId = await getProjectId();
+    const totalTodos = todos.length;
+    const byStatus = {
+      pending: todos.filter((t) => t.status === "pending").length,
+      inProgress: todos.filter((t) => t.status === "in-progress").length,
+      completed: todos.filter((t) => t.status === "completed").length,
+      blocked: todos.filter((t) => t.status === "blocked").length,
+    };
+
+    const avgProgress =
+      totalTodos > 0
+        ? Math.round(todos.reduce((sum, t) => sum + t.progress, 0) / totalTodos)
+        : 0;
+
+    return {
+      text: `# Project Summary: ${projectId}
+
+## Overview
+- **Total TODOs**: ${totalTodos}
+- **Average Progress**: ${avgProgress}%
+
+## Status Breakdown
+- ⏳ Pending: ${byStatus.pending}
+- 🔄 In Progress: ${byStatus.inProgress}
+- ✅ Completed: ${byStatus.completed}
+- 🚫 Blocked: ${byStatus.blocked}
+
+## Recent Activity
+${todos
+  .sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  )
+  .slice(0, 5)
+  .map((todo) => `- ${todo.title} (${todo.status})`)
+  .join("\n")}
+`,
+    };
+  },
+});
+
+server.addResource({
+  uri: "project://current/todos.json",
+  name: "All TODOs in JSON format",
+  description: "Complete list of TODOs in JSON format",
+  mimeType: "application/json",
+  async load() {
+    return {
+      text: JSON.stringify(todos, null, 2),
+    };
+  },
+});
+
+server.addResource({
+  uri: "project://current/todos.md",
+  name: "All TODOs in Markdown format",
+  description: "Complete list of TODOs formatted as Markdown",
+  mimeType: "text/markdown",
+  async load() {
+    const projectId = await getProjectId();
+    const markdown = todos
+      .map((todo) => {
+        let md = `## ${todo.title}\n`;
+        md += `- **Status**: ${todo.status}\n`;
+        md += `- **Priority**: ${todo.priority}\n`;
+        md += `- **Progress**: ${todo.progress}%\n`;
+        if (todo.description) md += `- **Description**: ${todo.description}\n`;
+        if (todo.dueDate) md += `- **Due**: ${todo.dueDate}\n`;
+        if (todo.tags.length > 0) md += `- **Tags**: ${todo.tags.join(", ")}\n`;
+        md += `- **Created**: ${todo.createdAt}\n`;
+        md += `- **Updated**: ${todo.updatedAt}\n\n`;
+        return md;
+      })
+      .join("");
+
+    return {
+      text: `# TODOs for Project: ${projectId}\n\n${markdown}`,
+    };
+  },
+});
+
+server.addResource({
+  uri: "project://current/todos.csv",
+  name: "All TODOs in CSV format",
+  description: "Complete list of TODOs in CSV format for spreadsheet import",
+  mimeType: "text/csv",
+  async load() {
+    const escapeCsv = (str: string) => `"${str.replace(/"/g, '""')}"`;
+    const csvHeader =
+      "ID,Title,Description,Status,Priority,Progress,Due Date,Tags,Created,Updated\n";
+    const csvRows = todos
+      .map((todo) => {
+        return [
+          escapeCsv(todo.id),
+          escapeCsv(todo.title),
+          escapeCsv(todo.description || ""),
+          escapeCsv(todo.status),
+          escapeCsv(todo.priority),
+          todo.progress.toString(),
+          escapeCsv(todo.dueDate || ""),
+          escapeCsv(todo.tags.join(";")),
+          escapeCsv(todo.createdAt),
+          escapeCsv(todo.updatedAt),
+        ].join(",");
+      })
+      .join("\n");
+
+    return {
+      text: csvHeader + csvRows,
+    };
+  },
+});
+
+server.addResource({
+  uri: "project://current/report",
+  name: "Project progress report",
+  description:
+    "Comprehensive project progress report with metrics and analysis",
+  mimeType: "text/markdown",
+  async load() {
+    const projectId = await getProjectId();
+    const totalTodos = todos.length;
+    const byStatus = {
+      pending: todos.filter((t) => t.status === "pending").length,
+      inProgress: todos.filter((t) => t.status === "in-progress").length,
+      completed: todos.filter((t) => t.status === "completed").length,
+      blocked: todos.filter((t) => t.status === "blocked").length,
+    };
+
+    const avgProgress =
+      totalTodos > 0
+        ? Math.round(todos.reduce((sum, t) => sum + t.progress, 0) / totalTodos)
+        : 0;
+
+    // Generate comprehensive project report
+    const now = new Date();
+    const overdueTodos = todos.filter(
+      (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== "completed"
+    );
+    const highPriorityTodos = todos.filter(
+      (t) => t.priority === "urgent" || t.priority === "high"
+    );
+    const blockedTodos = todos.filter((t) => t.status === "blocked");
+
+    return {
+      text: `# Project Report: ${projectId}
+*Generated on ${now.toISOString()}*
+
+## Executive Summary
+- **Total Tasks**: ${totalTodos}
+- **Completion Rate**: ${
+        totalTodos > 0 ? Math.round((byStatus.completed / totalTodos) * 100) : 0
+      }%
+- **Average Progress**: ${avgProgress}%
+
+## Critical Items
+${
+  overdueTodos.length > 0
+    ? `### ⚠️ Overdue Items (${overdueTodos.length})
+${overdueTodos
+  .map(
+    (t) =>
+      `- ${t.title} (${Math.floor(
+        (now.getTime() - new Date(t.dueDate!).getTime()) / (1000 * 60 * 60 * 24)
+      )} days overdue)`
+  )
+  .join("\n")}
+`
+    : "### ✅ No Overdue Items"
+}
+
+${
+  blockedTodos.length > 0
+    ? `### 🚫 Blocked Items (${blockedTodos.length})
+${blockedTodos.map((t) => `- ${t.title}`).join("\n")}
+`
+    : ""
+}
+
+${
+  highPriorityTodos.length > 0
+    ? `### 🔴 High Priority Items (${highPriorityTodos.length})
+${highPriorityTodos.map((t) => `- ${t.title} (${t.status})`).join("\n")}
+`
+    : ""
+}
+
+## Status Distribution
+- Pending: ${byStatus.pending} (${Math.round(
+        (byStatus.pending / totalTodos) * 100
+      )}%)
+- In Progress: ${byStatus.inProgress} (${Math.round(
+        (byStatus.inProgress / totalTodos) * 100
+      )}%)
+- Completed: ${byStatus.completed} (${Math.round(
+        (byStatus.completed / totalTodos) * 100
+      )}%)
+- Blocked: ${byStatus.blocked} (${Math.round(
+        (byStatus.blocked / totalTodos) * 100
+      )}%)
+`,
+    };
+  },
+});
+
+server.addResource({
+  uri: "project://current/metrics",
+  name: "Project metrics and analytics",
+  description: "Detailed project metrics and analytics in JSON format",
+  mimeType: "application/json",
+  async load() {
+    const projectId = await getProjectId();
+    const totalTodos = todos.length;
+    const byStatus = {
+      pending: todos.filter((t) => t.status === "pending").length,
+      inProgress: todos.filter((t) => t.status === "in-progress").length,
+      completed: todos.filter((t) => t.status === "completed").length,
+      blocked: todos.filter((t) => t.status === "blocked").length,
+    };
+
+    const avgProgress =
+      totalTodos > 0
+        ? Math.round(todos.reduce((sum, t) => sum + t.progress, 0) / totalTodos)
+        : 0;
+
+    const now = new Date();
+    const overdueTodos = todos.filter(
+      (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== "completed"
+    );
+
+    const metrics = {
+      project: projectId,
+      timestamp: new Date().toISOString(),
+      totals: {
+        todos: totalTodos,
+        pending: byStatus.pending,
+        inProgress: byStatus.inProgress,
+        completed: byStatus.completed,
+        blocked: byStatus.blocked,
+      },
+      progress: {
+        average: avgProgress,
+        distribution: todos.reduce((dist, todo) => {
+          const bucket = Math.floor(todo.progress / 10) * 10;
+          dist[bucket] = (dist[bucket] || 0) + 1;
+          return dist;
+        }, {} as Record<number, number>),
+      },
+      priorities: {
+        urgent: todos.filter((t) => t.priority === "urgent").length,
+        high: todos.filter((t) => t.priority === "high").length,
+        medium: todos.filter((t) => t.priority === "medium").length,
+        low: todos.filter((t) => t.priority === "low").length,
+      },
+      timeMetrics: {
+        overdue: overdueTodos.length,
+        dueSoon: todos.filter((t) => {
+          if (!t.dueDate || t.status === "completed") return false;
+          const dueDate = new Date(t.dueDate);
+          const daysDiff =
+            (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+          return daysDiff <= 7 && daysDiff >= 0;
+        }).length,
+      },
+    };
+
+    return {
+      text: JSON.stringify(metrics, null, 2),
+    };
+  },
+});
+
+// ====== PROMPTS SUPPORT ======
+// Provide pre-defined prompt templates for common TODO workflows
+
+server.addPrompt({
+  name: "daily-standup",
+  description: "Generate a daily standup summary based on current TODOs",
+  async load() {
+    const projectId = await getProjectId();
+    const inProgressTodos = todos.filter((t) => t.status === "in-progress");
+    const completedYesterday = todos.filter((t) => {
+      const updated = new Date(t.updatedAt);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      return t.status === "completed" && updated >= yesterday;
+    });
+
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Based on the current TODO status for project "${projectId}", help me prepare for today's standup meeting.
+
+**Currently In Progress (${inProgressTodos.length} items):**
+${inProgressTodos
+  .map((t) => `- ${t.title} (${t.progress}% complete)`)
+  .join("\n")}
+
+**Completed Yesterday (${completedYesterday.length} items):**
+${completedYesterday.map((t) => `- ${t.title}`).join("\n")}
+
+**Blocked Items:**
+${todos
+  .filter((t) => t.status === "blocked")
+  .map((t) => `- ${t.title}`)
+  .join("\n")}
+
+Please help me:
+1. Summarize what I accomplished yesterday
+2. Identify what I'm working on today
+3. Highlight any blockers or impediments
+4. Suggest priorities for today's work`,
+          },
+        },
+      ],
+    };
+  },
+});
+
+server.addPrompt({
+  name: "sprint-planning",
+  description: "Create a sprint planning summary with TODO prioritization",
+  arguments: [
+    {
+      name: "sprintDuration",
+      description: "Sprint duration in weeks",
+      required: false,
+    },
+  ],
+  async load(args) {
+    const projectId = await getProjectId();
+    const sprintWeeks = args.sprintDuration || "2";
+    const unassignedTodos = todos.filter((t) => t.status === "pending");
+
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Help me plan a ${sprintWeeks}-week sprint for project "${projectId}".
+
+**Available TODOs for Sprint Planning:**
+${unassignedTodos
+  .map(
+    (t) =>
+      `- ${t.title} (Priority: ${t.priority}${
+        t.dueDate ? `, Due: ${t.dueDate}` : ""
+      })`
+  )
+  .join("\n")}
+
+**Current Capacity:**
+- Sprint Duration: ${sprintWeeks} weeks
+- Currently In Progress: ${
+              todos.filter((t) => t.status === "in-progress").length
+            } items
+
+Please help me:
+1. Prioritize the pending TODOs based on urgency and importance
+2. Estimate which TODOs should be included in this sprint
+3. Identify any dependencies between TODOs
+4. Suggest a sprint goal based on the selected TODOs
+5. Highlight any risks or concerns for the sprint`,
+          },
+        },
+      ],
+    };
+  },
+});
+
+server.addPrompt({
+  name: "project-review",
+  description: "Generate a comprehensive project review and analysis",
+  async load() {
+    const projectId = await getProjectId();
+    const totalTodos = todos.length;
+    const completionRate =
+      totalTodos > 0
+        ? Math.round(
+            (todos.filter((t) => t.status === "completed").length /
+              totalTodos) *
+              100
+          )
+        : 0;
+
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Conduct a comprehensive review of project "${projectId}".
+
+**Project Metrics:**
+- Total TODOs: ${totalTodos}
+- Completion Rate: ${completionRate}%
+- Pending: ${todos.filter((t) => t.status === "pending").length}
+- In Progress: ${todos.filter((t) => t.status === "in-progress").length}
+- Completed: ${todos.filter((t) => t.status === "completed").length}
+- Blocked: ${todos.filter((t) => t.status === "blocked").length}
+
+**High Priority Items:**
+${todos
+  .filter((t) => t.priority === "urgent" || t.priority === "high")
+  .map((t) => `- ${t.title} (${t.status})`)
+  .join("\n")}
+
+**Overdue Items:**
+${todos
+  .filter((t) => {
+    if (!t.dueDate || t.status === "completed") return false;
+    return new Date(t.dueDate) < new Date();
+  })
+  .map((t) => `- ${t.title} (${t.status})`)
+  .join("\n")}
+
+Please provide:
+1. Overall project health assessment
+2. Key accomplishments and progress
+3. Areas of concern or risk
+4. Recommendations for improvement
+5. Next steps and priorities`,
+          },
+        },
+      ],
+    };
+  },
+});
+
+server.addPrompt({
+  name: "todo-prioritization",
+  description: "Help prioritize TODOs based on urgency and importance",
+  async load() {
+    const projectId = await getProjectId();
+
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Help me prioritize the pending TODOs for project "${projectId}" using the Eisenhower Matrix (urgent/important framework).
+
+**Pending TODOs to Prioritize:**
+${todos
+  .filter((t) => t.status === "pending")
+  .map(
+    (t) => `- ${t.title}
+  Priority: ${t.priority}
+  ${t.description ? `Description: ${t.description}` : ""}
+  ${t.dueDate ? `Due Date: ${t.dueDate}` : "No due date set"}
+  Tags: ${t.tags.join(", ") || "None"}`
+  )
+  .join("\n\n")}
+
+Please help me:
+1. Categorize each TODO into the Eisenhower Matrix quadrants:
+   - Urgent & Important (Do First)
+   - Important but Not Urgent (Schedule)
+   - Urgent but Not Important (Delegate)
+   - Neither Urgent nor Important (Eliminate)
+2. Suggest an execution order for the "Do First" and "Schedule" items
+3. Recommend any TODOs that could be broken down into smaller tasks
+4. Identify dependencies between TODOs`,
+          },
+        },
+      ],
+    };
+  },
+});
+
+server.addPrompt({
+  name: "blocked-items-review",
+  description: "Review and analyze blocked items with suggested actions",
+  async load() {
+    const projectId = await getProjectId();
+    const blockedTodos = todos.filter((t) => t.status === "blocked");
+
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Review the blocked items in project "${projectId}" and suggest actionable steps to unblock them.
+
+**Blocked TODOs (${blockedTodos.length} items):**
+${blockedTodos
+  .map(
+    (t) => `- ${t.title}
+  Priority: ${t.priority}
+  ${t.description ? `Description: ${t.description}` : ""}
+  Dependencies: ${
+    t.dependencies.length > 0 ? t.dependencies.join(", ") : "None listed"
+  }
+  Tags: ${t.tags.join(", ") || "None"}
+  Blocked since: ${t.updatedAt}`
+  )
+  .join("\n\n")}
+
+**Dependencies Analysis:**
+${blockedTodos
+  .map((blocked) => {
+    const deps = blocked.dependencies.map((depId) => {
+      const dep = todos.find((t) => t.id === depId);
+      return dep ? `${dep.title} (${dep.status})` : `Unknown (${depId})`;
+    });
+    return `- ${blocked.title} depends on: ${
+      deps.join(", ") || "No dependencies found"
+    }`;
+  })
+  .join("\n")}
+
+Please help me:
+1. Analyze why each TODO is blocked
+2. Identify which dependencies are actually completed and could be unblocked
+3. Suggest specific actions to resolve each blocker
+4. Recommend alternative approaches or workarounds
+5. Prioritize which blocked items to tackle first`,
+          },
+        },
+      ],
+    };
+  },
+});
+
+// Add connection event handlers to manage client capabilities
+// Note: The "could not infer client capabilities" warning is common when:
+// 1. Clients don't immediately respond to capability negotiation
+// 2. The stdio transport has timing issues during initial handshake
+// 3. The client implementation doesn't fully support all MCP capabilities
+// This is usually harmless and the server will function normally with basic capabilities
+server.on("connect", (event) => {
+  const session = event.session;
+  console.error(`✅ Client connected successfully`);
+
+  // Log capabilities once they're available (may be delayed)
+  setTimeout(() => {
+    console.error(`📋 Client capabilities detected:`, {
+      capabilities: session.clientCapabilities ? "Available" : "Using defaults",
+      loggingLevel: session.loggingLevel || "info",
+      roots: session.roots
+        ? `${session.roots.length} roots configured`
+        : "No roots configured",
+    });
+  }, 1000); // Give time for capabilities to be negotiated
+
+  // Listen for capability changes
+  session.on("rootsChanged", (event) => {
+    console.error(
+      "🔄 Client roots updated:",
+      event.roots?.length || 0,
+      "roots"
+    );
+  });
+
+  session.on("error", (event) => {
+    console.error("❌ Session error:", event.error);
+  });
+});
+
+server.on("disconnect", (event) => {
+  console.error("👋 Client disconnected");
+});
+
 // Start the server
 server.start({
   transportType: "stdio",
 });
 
-console.error("Agent TODO Manager MCP Server started");
+console.error("🚀 Agent TODO Manager MCP Server started");
+console.error(
+  "💡 Note: 'Could not infer client capabilities' warnings are usually harmless"
+);
+console.error("   The server will work normally with default MCP capabilities");
