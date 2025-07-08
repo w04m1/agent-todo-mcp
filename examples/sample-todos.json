@@ -1,0 +1,98 @@
+[
+    {
+        "id": "todo_sample_001",
+        "title": "Research authentication frameworks",
+        "description": "Evaluate different authentication solutions like Auth0, Firebase Auth, and custom JWT implementation",
+        "status": "completed",
+        "priority": "medium",
+        "createdAt": "2024-01-15T10:00:00.000Z",
+        "updatedAt": "2024-01-20T16:30:00.000Z",
+        "dueDate": "2024-01-25T23:59:59.000Z",
+        "tags": [
+            "research",
+            "authentication",
+            "backend"
+        ],
+        "dependencies": [],
+        "progress": 100,
+        "metadata": {
+            "estimatedHours": 4,
+            "actualHours": 3.5,
+            "source": "product-requirements"
+        }
+    },
+    {
+        "id": "todo_sample_002",
+        "title": "Implement JWT authentication",
+        "description": "Build JWT-based authentication system with login, logout, and token refresh functionality",
+        "status": "in-progress",
+        "priority": "high",
+        "createdAt": "2024-01-20T09:00:00.000Z",
+        "updatedAt": "2024-01-22T14:15:00.000Z",
+        "dueDate": "2024-02-05T23:59:59.000Z",
+        "tags": [
+            "backend",
+            "authentication",
+            "jwt"
+        ],
+        "dependencies": [
+            "todo_sample_001"
+        ],
+        "progress": 65,
+        "metadata": {
+            "estimatedHours": 12,
+            "framework": "fastapi",
+            "assignee": "agent",
+            "blockers": []
+        }
+    },
+    {
+        "id": "todo_sample_003",
+        "title": "Write authentication tests",
+        "description": "Create comprehensive unit and integration tests for the authentication system",
+        "status": "pending",
+        "priority": "medium",
+        "createdAt": "2024-01-22T11:00:00.000Z",
+        "updatedAt": "2024-01-22T11:00:00.000Z",
+        "dueDate": "2024-02-10T23:59:59.000Z",
+        "tags": [
+            "testing",
+            "authentication",
+            "backend"
+        ],
+        "dependencies": [
+            "todo_sample_002"
+        ],
+        "progress": 0,
+        "metadata": {
+            "estimatedHours": 6,
+            "testFramework": "pytest",
+            "coverage": "unit,integration"
+        }
+    },
+    {
+        "id": "todo_sample_004",
+        "title": "Setup monitoring dashboard",
+        "description": "Configure Grafana dashboard for system monitoring and alerting",
+        "status": "blocked",
+        "priority": "low",
+        "createdAt": "2024-01-18T14:00:00.000Z",
+        "updatedAt": "2024-01-23T09:30:00.000Z",
+        "dueDate": "2024-02-15T23:59:59.000Z",
+        "tags": [
+            "monitoring",
+            "infrastructure",
+            "devops"
+        ],
+        "dependencies": [],
+        "progress": 25,
+        "metadata": {
+            "estimatedHours": 8,
+            "blocker": "waiting for prometheus setup",
+            "tools": [
+                "grafana",
+                "prometheus"
+            ]
+        }
+    }
+]

@@ -1,0 +1,7 @@
+{
+    "mcpServers": {
+        "agent-todo": {
+            "command": "agent-todo-mcp"
+        }
+    }
+}
