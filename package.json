@@ -1,6 +1,6 @@
 {
   "name": "agent-todo-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for agent TODO management and task tracking",
   "keywords": [
     "mcp",
